@@ -64,12 +64,6 @@ def tree(name):
             else:
                 node_group.inputs.remove(node_input)
 
-        for group_output in get_node_outputs(node_group):
-            if IS_BLENDER_4:
-                node_group.interface.remove(group_output)
-            else:
-                node_group.outputs.remove(group_output)
-        
         # Setup the group inputs
         group_input_node = node_group.nodes.new('NodeGroupInput')
         group_output_node = node_group.nodes.new('NodeGroupOutput')
@@ -136,26 +130,29 @@ def tree(name):
             outputs = builder(**builder_inputs)
 
         # Create the output sockets
-        if isinstance(outputs, dict):
-            # Use a dict to name each return value
-            for i, (k, v) in enumerate(outputs.items()):
-                if not issubclass(type(v), Type):
-                    v = Type(value=v)
+        # Use a dict to name each return value
+        if not isinstance(outputs, dict):
+            outputs = {f'Result{i}':output for i,output in enumerate(_as_iterable(outputs))}
+        node_outputs = get_node_outputs(node_group)
+        for i, (k, v) in enumerate(outputs.items()):
+            if not issubclass(type(v), Type):
+                v = Type(value=v)
+            if i < len(node_outputs):
+                node_outputs[i].socket_type = v.socket_type
+                node_outputs[i].name = k
+            else:
                 if IS_BLENDER_4:
                     node_group.interface.new_socket(socket_type=v.socket_type, name=k, in_out='OUTPUT')
                 else:
                     node_group.outputs.new(v.socket_type, k)
-                node_group.links.new(v._socket, group_output_node.inputs[i])
-        else: 
-            for i, result in enumerate(_as_iterable(outputs)):
-                if not issubclass(type(result), Type):
-                    result = Type(value=result)
-                    # raise Exception(f"Return value '{result}' is not a valid 'Type' subclass.")
-                if IS_BLENDER_4:
-                    node_group.interface.new_socket(socket_type=result.socket_type, name='Result', in_out='OUTPUT')
-                else:
-                    node_group.outputs.new(result.socket_type, 'Result')
-                node_group.links.new(result._socket, group_output_node.inputs[i])
+            node_group.links.new(v._socket, group_output_node.inputs[i])
+
+        for node_output in node_outputs[len(outputs):]:
+            if IS_BLENDER_4:
+                node_group.interface.remove(node_output)
+            else:
+                node_group.outputs.remove(node_output)
+
         
         _arrange(node_group)
 
@@ -166,6 +163,10 @@ def tree(name):
                 result = geometrynodegroup(node_tree=node_group, *args, **kwargs)
             else:
                 result = group(node_tree=node_group, *args, **kwargs)
+
+            if isinstance(result, OutputsList):
+                result = next(iter(result.values()))
+
             group_outputs = []
             for group_output in result._socket.node.outputs:
                 group_outputs.append(Type(group_output))
